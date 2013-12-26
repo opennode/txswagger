@@ -26,11 +26,16 @@ pip-log.txt
 .coverage
 .tox
 nosetests.xml
+_trial_temp
 
 # Translations
 *.mo
 
 # Mr Developer
 .mr.developer.cfg
+
+.idea
+*.iml
 .project
 .pydevproject
+
