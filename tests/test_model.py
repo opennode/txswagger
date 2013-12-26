@@ -3,7 +3,82 @@ import unittest
 from swagger.core import ApiListingReference, ResourceListing
 
 
-class ParameterProviderMixin(object):
+class ModelTestCaseMixin(object):
+    model_class = None
+    optional_parameters = ()
+
+    @property
+    def mandatory_parameters(self):
+        return tuple(
+            p for p in self.create_default_parameters().keys()
+            if p not in self.optional_parameters
+        )
+
+    def test_mandatory_parameters_cannot_be_omitted(self):
+        for mandatory_parameter in self.mandatory_parameters:
+            # self.assertRaises doesn't fit here
+            # since it doesn't provide means to customize failure message
+            try:
+                p1 = self.create_parameters(without=mandatory_parameter)
+                self.model_class(**p1)
+            except TypeError:
+                pass
+            else:
+                self.fail('Was able to omit mandatory parameter "%s"' %
+                          mandatory_parameter)
+
+            try:
+                kwargs = {mandatory_parameter: None}
+                p2 = self.create_parameters(**kwargs)
+                self.model_class(**p2)
+            except TypeError:
+                pass
+            else:
+                self.fail('Was able to set mandatory parameter "%s" to None' %
+                          mandatory_parameter)
+
+    def test_optional_parameters_can_be_omitted(self):
+        for optional_parameter in self.optional_parameters:
+            try:
+                p1 = self.create_parameters(without=optional_parameter)
+                self.model_class(**p1)
+            except TypeError:
+                self.fail('Unable to omit optional parameter "%s"' %
+                          optional_parameter)
+
+            try:
+                kwargs = {optional_parameter: None}
+                p2 = self.create_parameters(**kwargs)
+                self.model_class(**p2)
+            except TypeError:
+                self.fail('Unable to set optional parameter "%s" to None' %
+                          optional_parameter)
+
+    def test_missing_optional_parameters_are_not_in_dict_representation(self):
+        for parameter in self.optional_parameters:
+            params = self.create_parameters(without=parameter)
+
+            ref_dict = self.model_class(**params).as_dict()
+
+            self.assertNotIn(parameter, ref_dict)
+
+    def check_for_bad_values(self, argument_name, expected_type, bad_values):
+        expected_message = ('Inappropriate argument type for "%s"; '
+                            '%s expected' % (argument_name, expected_type))
+
+        for value in bad_values:
+            try:
+                kwargs = {argument_name: value}
+                self.model_class(**self.create_parameters(**kwargs))
+            except TypeError as e:
+                self.assertEqual(expected_message, e.message)
+            else:
+                self.fail('No type check was performed for parameter "%s"' %
+                          argument_name)
+
+    def create_default_parameters(self):
+        raise NotImplementedError
+
     def create_parameters(self, **kwargs):
         without = kwargs.pop('without', ())
         if isinstance(without, str):
@@ -21,56 +96,17 @@ class ParameterProviderMixin(object):
         return p
 
 
-class ApiListingReferenceTest(unittest.TestCase, ParameterProviderMixin):
+class ApiListingReferenceTest(unittest.TestCase, ModelTestCaseMixin):
+    model_class = ApiListingReference
     optional_parameters = ('description',)
 
-    def test_description_is_optional(self):
-        p1 = self.create_parameters(without='description')
-        ApiListingReference(**p1)
-
-        p2 = self.create_parameters(description=None)
-        ApiListingReference(**p2)
+    def test_path_must_be_string(self):
+        self.check_for_bad_values('path', 'str',
+                                  bad_values=(123, [], (), 12.34))
 
     def test_description_must_be_string(self):
-        expected_message = ('Inappropriate argument type for description; '
-                            'str expected')
-
-        bad_values = (123, [], (), 12.34)
-
-        for value in bad_values:
-            with self.assertRaises(TypeError) as m:
-                ApiListingReference(**self.create_parameters(description=value))
-            self.assertEqual(expected_message, m.exception.message)
-
-    def test_path_is_mandatory(self):
-        p = self.create_parameters(path=None)
-
-        with self.assertRaises(TypeError):
-            ApiListingReference(**p)
-
-        p = self.create_parameters(without='description')
-        del p['path']
-
-        with self.assertRaises(TypeError):
-            ApiListingReference(**p)
-
-    def test_path_must_be_string(self):
-        expected_message = 'Inappropriate argument type for path; str expected'
-
-        bad_values = (123, [], (), 12.34)
-
-        for value in bad_values:
-            with self.assertRaises(TypeError) as m:
-                ApiListingReference(**self.create_parameters(path=value))
-            self.assertEqual(expected_message, m.exception.message)
-
-    def test_missing_optional_parameters_are_not_in_dict_representation(self):
-        for parameter in self.optional_parameters:
-            params = self.create_parameters(without=parameter)
-
-            ref_dict = ApiListingReference(**params).as_dict()
-
-            self.assertNotIn(parameter, ref_dict)
+        self.check_for_bad_values('description', 'str',
+                                  bad_values=(123, [], (), 12.34))
 
     def create_default_parameters(self):
         return {
@@ -79,46 +115,29 @@ class ApiListingReferenceTest(unittest.TestCase, ParameterProviderMixin):
         }
 
 
-class ResourceListingTest(unittest.TestCase, ParameterProviderMixin):
+class ResourceListingTest(unittest.TestCase, ModelTestCaseMixin):
+    model_class = ResourceListing
     optional_parameters = ('description', 'info')
 
-    def test_description_is_optional(self):
-        p = self.create_parameters(without='description')
+    def test_api_version_must_be_string(self):
+        self.check_for_bad_values('api_version', 'str',
+                                  bad_values=(123, [], (), 12.34))
 
-        ResourceListing(**p)
-
-    def test_info_is_optional(self):
-        p = self.create_parameters(without='info')
-
-        ResourceListing(**p)
-
-    def test_missing_optional_parameters_are_not_in_dict_representation(self):
-        for parameter in self.optional_parameters:
-            params = self.create_parameters(without=parameter)
-
-            ref_dict = ResourceListing(**params).as_dict()
-
-            self.assertNotIn(parameter, ref_dict)
+    def test_description_must_be_string(self):
+        self.check_for_bad_values('description', 'str',
+                                  bad_values=(123, [], (), 12.34))
 
     def test_bad_apis_argument(self):
-        exception_message = ('Inappropriate argument type for apis. '
-                             'Iterable of ApiListingReference expected.')
-
         api_ref = ApiListingReference('path1', 'descr1')
         bad_api_ref = 123
 
-        apis_parameters = (
-            'bad api ref',
-            bad_api_ref,
-            [api_ref, 'bad api ref'],
-            (bad_api_ref, api_ref),
-        )
-
-        for apis_parameter in apis_parameters:
-            with self.assertRaises(TypeError) as m:
-                p = self.create_parameters(apis=apis_parameter)
-                ResourceListing(**p)
-            self.assertEqual(exception_message, m.exception.message)
+        self.check_for_bad_values('apis', 'iterable of ApiListingReference',
+                                  bad_values=(
+                                      'bad api ref',
+                                      bad_api_ref,
+                                      [api_ref, 'bad api ref'],
+                                      (bad_api_ref, api_ref),
+                                  ))
 
     def test_apis_turn_to_tuple_of_api_listing_references(self):
         api_ref1 = ApiListingReference('path1', 'descr1')
